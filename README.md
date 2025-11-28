@@ -1,6 +1,6 @@
 # Locable — AI-Powered Website Builder
 
-Locable is an intelligent web development assistant that leverages local LLMs and vector retrieval to help you create professional websites. It combines a builder agent with Bootstrap-based templates and a Chroma vector database for intelligent context retrieval.
+Locable is a low scale web development assistant that leverages *local* LLMs and vector retrieval to help you create professional websites *for free* using AI. It combines a builder agent with Bootstrap-based templates and a Chroma vector database for intelligent context retrieval.
 
 ## Features
 
@@ -9,7 +9,7 @@ Locable is an intelligent web development assistant that leverages local LLMs an
 - **Vector Retrieval (RAG)**: Chroma-backed vector store indexes Bootstrap documentation for context-aware code generation
 - **Interactive CLI**: Chat-based interface to request websites and iterate on designs
 - **Tool Execution**: Write, read, and list files directly from the agent
-- **Local-First**: All processing happens locally — no cloud dependencies or API calls
+- **Local-First**: All processing happens locally, no cloud dependencies or API calls
 
 ## Project Structure
 
@@ -55,7 +55,7 @@ locable/
 ### Prerequisites
 - Python 3.10+
 - Ollama with qwen2.5-coder:14b-instruct model (or compatible LLM)
-- 4GB+ RAM recommended
+- a lot of VRAM and/or RAM. Less means slower and less context but it would still work. recommended: 20 GB total memory and CUDA graphics card
 - Windows, macOS, or Linux
 
 ### Setup
@@ -65,21 +65,12 @@ locable/
    cd locable
    ```
 
-2. **Create and activate a virtual environment (recommended):**
-   ```bash
-   python -m venv venv
-   # Windows
-   venv\Scripts\activate
-   # macOS/Linux
-   source venv/bin/activate
-   ```
-
-3. **Install dependencies:**
+2. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Ensure Ollama is running:**
+3. **Ensure Ollama is running:**
    
    In one terminal, start the Ollama server:
    ```bash
@@ -139,6 +130,9 @@ The agent will:
 3. Execute the `write_file` tool to save files to `site/`
 4. Display completion status
 
+#### Note
+The agent has stict guidelines on what amount of information it needs to generate the website, to be able to generate detailed results. Tell it to use sample texts or ignore that, if you dont want to specify everything. Find the system prompt in [system prompt](prompts/system_prompt.txt)
+
 ### Step 4: View Your Website
 
 Open the generated website in a browser:
@@ -162,7 +156,7 @@ xdg-open site/index.html
 2. **Retrieval**: Agent queries Chroma vector store for relevant Bootstrap patterns
 3. **Model Call**: LLM (Ollama) generates HTML/CSS/JS based on request + retrieved context
 4. **Tool Execution**: Agent executes `write_file` to save generated code
-5. **Iteration**: Refine by asking for changes
+5. **Iteration**: Refine by asking for changes - limited by VRAM 
 
 ### Vector Store (RAG)
 
@@ -191,6 +185,9 @@ agent = BuilderAgent(
 ```
 
 Available models: `ollama list` or [ollama.ai/library](https://ollama.ai/library)
+### Note
+- the model needs to support tool calling
+- better models can lead to way better results but need more system memory and vice versa
 
 ### Vector Store Settings
 
@@ -233,7 +230,7 @@ python -m rag.chroma_store
 ### Slow Generation
 - Use a smaller/faster model
 - Reduce vector retrieval count
-- Ensure sufficient RAM (8GB+ recommended for 14B models)
+- Ensure sufficient RAM/VRAM
 
 ## Example Requests
 
@@ -271,6 +268,7 @@ python -c "from rag.chroma_store import ChromaVectorStore; s = ChromaVectorStore
 # Test agent
 python -m agent.builder_agent
 ```
+by standart the chroma db is tested at the start of each agent run
 
 ## Performance
 
@@ -281,7 +279,7 @@ python -m agent.builder_agent
 
 ## Limitations
 
-- Local LLMs may produce less refined code than GPT-4
+- Local LLMs may produce less refined code than online alternatives
 - Vector retrieval returns Bootstrap patterns only
 - No image generation (uses placeholder URLs)
 - No database/backend generation
@@ -290,13 +288,8 @@ python -m agent.builder_agent
 ## Future Enhancements
 
 - [ ] Multi-page site generation
-- [ ] Custom component libraries
-- [ ] Real image generation
-- [ ] Database schema generation
 - [ ] API endpoint scaffolding
-- [ ] Accessibility (a11y) checks
-- [ ] Performance optimization
-- [ ] Form validation generation
+- [ ] GUI on localhost + agent API
 
 ## License
 
@@ -328,4 +321,4 @@ For issues or questions:
 
 ---
 
-**Happy building! 🚀**
+**Happy building!**
