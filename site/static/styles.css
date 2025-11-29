@@ -1,1 +1,11 @@
-body { padding-top: 60px; } .hero{padding:2rem;}
+/* Custom Styles */
+.hero-section {
+  background-image: url('https://via.placeholder.com/1920x500');
+  background-size: cover;
+  color: white;
+}
+
+.menu-section .card:hover {
+  transform: translateY(-10px);
+  transition: transform 0.3s ease-in-out;
+}

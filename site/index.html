@@ -1,42 +1,125 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Sushi Masterpiece</title>
-    <link rel="stylesheet" href="static/bootstrap.min.css">
-    <link rel="stylesheet" href="static/styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sushi Palace</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="static/styles.css">
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">Sushi Masterpiece</a>
-        </div>
-    </nav>
-    <main class="container">
-        <div class="py-5 text-center hero">
-            <h1 class="display-4">Sushi Masterpiece</h1>
-            <p class="lead">Indulge in the art of Japanese cuisine.</p>
+  <!-- Hero Section -->
+  <section class="hero-section text-center py-5 bg-light">
+    <div class="container">
+      <h1 class="display-4">Welcome to Sushi Palace</h1>
+      <p class="lead">Experience the art of sushi making in a luxurious setting.</p>
+    </div>
+  </section>
+
+  <!-- Menu Section -->
+  <section class="menu-section py-5">
+    <div class="container">
+      <h2 class="text-center mb-4">Our Menu</h2>
+      <div class="row row-cols-1 row-cols-md-3 g-4">
+        <!-- Card 1 -->
+        <div class="col">
+          <div class="card border-0 shadow h-100">
+            <img src="https://via.placeholder.com/250x150" alt="Sushi Roll 1" class="card-img-top">
+            <div class="card-body">
+              <h5 class="card-title">California Roll</h5>
+              <p class="card-text">Fresh salmon, avocado, cucumber, and crab meat.</p>
+            </div>
+          </div>
         </div>
 
-        <div class="row">
-            <div class="col-md-8">
-                <h2>About</h2>
-                <p>Welcome to Sushi Masterpiece, where every bite is a piece of art. Our chefs use only the freshest ingredients to create authentic and exquisite sushi dishes.</p>
+        <!-- Card 2 -->
+        <div class="col">
+          <div class="card border-0 shadow h-100">
+            <img src="https://via.placeholder.com/250x150" alt="Sushi Roll 2" class="card-img-top">
+            <div class="card-body">
+              <h5 class="card-title">Philadelphia Roll</h5>
+              <p class="card-text">Smoked salmon, cream cheese, avocado, and cucumber.</p>
             </div>
-            <div class="col-md-4">
-                <h3>Contact</h3>
-                <address>
-                    123 Sushi Lane<br>
-                    Tokyo<br>
-                    <a href="tel:+81312345678">+81-3-1234-5678</a><br>
-                    <a href="mailto:sushi@example.com">sushi@example.com</a>
-                </address>
-            </div>
+          </div>
         </div>
-    </main>
 
-    <script src="static/bootstrap.bundle.min.js"></script>
-    <script src="static/script.js"></script>
+        <!-- Card 3 -->
+        <div class="col">
+          <div class="card border-0 shadow h-100">
+            <img src="https://via.placeholder.com/250x150" alt="Sushi Roll 3" class="card-img-top">
+            <div class="card-body">
+              <h5 class="card-title">Dragon Roll</h5>
+              <p class="card-text">Salmon, yellowtail, avocado, and cucumber.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4 -->
+        <div class="col">
+          <div class="card border-0 shadow h-100">
+            <img src="https://via.placeholder.com/250x150" alt="Sushi Roll 4" class="card-img-top">
+            <div class="card-body">
+              <h5 class="card-title">Rainbow Roll</h5>
+              <p class="card-text">Tuna, yellowtail, salmon, and cucumber.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 5 -->
+        <div class="col">
+          <div class="card border-0 shadow h-100">
+            <img src="https://via.placeholder.com/250x150" alt="Sushi Roll 5" class="card-img-top">
+            <div class="card-body">
+              <h5 class="card-title">Spider Roll</h5>
+              <p class="card-text">Tuna, salmon, yellowtail, avocado, and cucumber.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 6 -->
+        <div class="col">
+          <div class="card border-0 shadow h-100">
+            <img src="https://via.placeholder.com/250x150" alt="Sushi Roll 6" class="card-img-top">
+            <div class="card-body">
+              <h5 class="card-title">Mango Sticky Rice Roll</h5>
+              <p class="card-text">Fresh mango, sticky rice, and avocado.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact Section -->
+  <section class="contact-section py-5 bg-light">
+    <div class="container">
+      <h2 class="text-center mb-4">Contact Us</h2>
+      <form>
+        <div class="mb-3">
+          <label for="name" class="form-label">Name</label>
+          <input type="text" class="form-control" id="name" required>
+        </div>
+        <div class="mb-3">
+          <label for="email" class="form-label">Email address</label>
+          <input type="email" class="form-control" id="email" required>
+        </div>
+        <div class="mb-3">
+          <label for="message" class="form-label">Message</label>
+          <textarea class="form-control" id="message" rows="4" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Send Message</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bg-dark text-white text-center py-3">
+    <div class="container">
+      &copy; 2023 Sushi Palace. All rights reserved.
+    </div>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="static/script.js"></script>
 </body>
 </html>

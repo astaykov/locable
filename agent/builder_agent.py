@@ -1,302 +1,286 @@
+import re
 import json
+import os
+from pathlib import Path
 from .agent import write_file, read_file, list_files, load_tools, load_system_prompt
 from .final_model import FinalModelClient
 from rag.vectorstore import LocalVectorStore
 
 
 class BuilderAgent:
-    """Builder agent that coordinates model calls and local tool execution.
-
-    This agent uses the existing tool implementations found in
-    `agent/agent.py` (write_file, read_file, list_files) and the
-    `tools.json` metadata loaded by `load_tools()`.
+    """
+    Builder agent that coordinates model calls, message flow, and tool execution.
+    This version removes the fallback scaffold and enforces model-directed building.
+    Phase 1 (information gathering) is still supported.
     """
 
     def __init__(self, model=None, host=None):
         model = model or "qwen2.5-coder:14b-instruct"
         host = host or "http://localhost:11434"
         self.client = FinalModelClient(model=model, host=host)
+
+        # load tools and system prompt
         self.tools = load_tools()
         self.system_prompt = load_system_prompt()
+
+        # conversation state
         self.messages = [{"role": "system", "content": self.system_prompt}]
 
-        # Chroma-backed retriever
-        self.store = LocalVectorStore(persist_dir="data/chroma", collection_name="bootstrap")
+        # retrieval layer
+        self.store = LocalVectorStore(
+            persist_dir="data/chroma",
+            collection_name="bootstrap"
+        )
 
+    # -------------------------------------------------------------
+    # Tool execution
+    # -------------------------------------------------------------
     def execute_tool(self, name, args):
+        """
+        Execute a declared tool using the existing write_file/read_file/list_files helpers.
+        This method forces all writes into site/ for safety, and rewrites Bootstrap CDN paths.
+        """
+
         if name == "write_file":
-            return write_file(args["path"], args["content"])
+            path = args.get("path")
+            content = args.get("content", "")
+            if not path:
+                return "ERROR: missing path"
+
+            # normalize path into site/
+            p = Path(path)
+            if not p.parts or p.parts[0] != "site":
+                p = Path("site") / p
+            full = p.resolve()
+            os.makedirs(full.parent, exist_ok=True)
+
+            # rewrite Bootstrap CDN references to local static files
+            if full.suffix.lower() == ".html" and isinstance(content, str):
+                content = (
+                    content.replace(
+                        "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css",
+                        "static/bootstrap.min.css"
+                    )
+                    .replace(
+                        "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js",
+                        "static/bootstrap.bundle.min.js"
+                    )
+                )
+
+            return write_file(str(full), content)
+
         elif name == "read_file":
-            return read_file(args["path"])
+            return read_file(args.get("path"))
+
         elif name == "list_files":
             return list_files()
-        else:
-            return f"Unknown tool: {name}"
 
-    def _append_retrieval_context(self, user_input, k: int = 3):
+        # unknown tool
+        return f"Unknown tool: {name}"
+
+    # -------------------------------------------------------------
+    # Retrieval context injection
+    # -------------------------------------------------------------
+    def _append_retrieval_context(self, user_input, k=5):
+        """
+        Perform Bootstrap-component retrieval using the local vector store and
+        inject results as a system message. This improves model grounding.
+        """
+
         try:
             hits = self.store.search(user_input, k)
         except Exception:
             return False
 
-        # LocalVectorStore.search returns a list of documents (compat wrapper).
-        # Accept either list-of-strings or dict-like chroma result.
-        docs = []
+        # normalize retrieved docs
         if isinstance(hits, dict):
             docs = (hits.get("documents") or [[]])[0]
         elif isinstance(hits, list):
             docs = hits
-        elif hasattr(hits, "__iter__"):
+        else:
             try:
                 docs = list(hits)
-            except Exception:
+            except:
                 docs = []
 
         if not docs:
             return False
 
-        # include short retrieved context as a system message so the model can reference it
-        snippet = "\n\n--- Retrieved documents (top %d) ---\n\n" % k
+        snippet = "\n\n--- Retrieved Bootstrap context ---\n\n"
         for i, d in enumerate(docs[:k]):
-            snippet += f"[{i+1}] {d[:1000].replace('\\n',' ')}\n\n"
+            snippet += f"[{i+1}] {d[:1500].replace('\\n',' ')}\n\n"
 
         self.messages.append({"role": "system", "content": snippet})
         return True
 
-    def _user_confirmed_build(self, last_user: str, assistant_content: str) -> bool:
-        if not last_user:
-            return False
-        lu = last_user.strip().lower()
-        if any(tok in lu for tok in ("yes", "y", "do it", "go ahead", "build", "please build")):
-            # also check assistant asked a build question
-            if assistant_content and "build" in assistant_content.lower():
-                return True
-        return False
+    # -------------------------------------------------------------
+    # Tool-call execution helper
+    # -------------------------------------------------------------
+    def _exec_tool_call(self, call):
+        """
+        Execute a single tool call. Accepts any model-produced shape.
+        """
 
-    def _build_website(self) -> str:
-        """Simple deterministic website scaffolding using existing write_file tool."""
-        # Build index.html using Bootstrap assets if available in data/bootstrap
-        # Prefer copying the project's bundled bootstrap files into site/static
-        bs_css_src = "data/bootstrap/bootstrap.min.css"
-        bs_js_src = "data/bootstrap/bootstrap.bundle.min.js"
+        fn = call.get("function") or {}
+        tool_name = fn.get("name") or call.get("name")
+        raw_args = fn.get("arguments") if fn else call.get("arguments")
 
-        # Default fallback small CSS/JS if bootstrap files are missing
-        fallback_css = "body { font-family: Arial, sans-serif; margin:0; padding:0; }\nnav{background:#0a6ea8;color:#fff;padding:1rem}"
-        fallback_js = "console.log('Sushi Masterpiece loaded');"
-
-        results = []
-
-        # Copy bootstrap files into site/static if present
-        try:
-            css_content = read_file(bs_css_src)
-            if css_content.startswith("Error: file not found"):
-                css_content = fallback_css
-                results.append(f"{bs_css_src}: MISSING, using fallback styles")
-            else:
-                results.append(f"{bs_css_src}: copied to site/static/bootstrap.min.css")
-        except Exception as e:
-                css_content = fallback_css
-                results.append(f"{bs_css_src}: READ ERROR {e}")
-
-        try:
-            js_content = read_file(bs_js_src)
-            if js_content.startswith("Error: file not found"):
-                js_content = fallback_js
-                results.append(f"{bs_js_src}: MISSING, using fallback script")
-            else:
-                results.append(f"{bs_js_src}: copied to site/static/bootstrap.bundle.min.js")
-        except Exception as e:
-                js_content = fallback_js
-                results.append(f"{bs_js_src}: READ ERROR {e}")
-
-        # Minimal custom styles that won't override Bootstrap
-        custom_css = "body { padding-top: 60px; } .hero{padding:2rem;}"
-
-        # Use Bootstrap classes in the HTML structure
-        index_html = f"""<!doctype html>
-<html lang=\"en\">
-<head>
-    <meta charset=\"utf-8\">
-    <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-    <title>Sushi Masterpiece</title>
-    <link rel=\"stylesheet\" href=\"static/bootstrap.min.css\">
-    <link rel=\"stylesheet\" href=\"static/styles.css\">
-</head>
-<body>
-    <nav class=\"navbar navbar-expand-lg navbar-dark bg-primary fixed-top\">
-        <div class=\"container-fluid\">
-            <a class=\"navbar-brand\" href=\"#\">Sushi Masterpiece</a>
-        </div>
-    </nav>
-    <main class=\"container\">
-        <div class=\"py-5 text-center hero\">
-            <h1 class=\"display-4\">Sushi Masterpiece</h1>
-            <p class=\"lead\">Indulge in the art of Japanese cuisine.</p>
-        </div>
-
-        <div class=\"row\">
-            <div class=\"col-md-8\">
-                <h2>About</h2>
-                <p>Welcome to Sushi Masterpiece, where every bite is a piece of art. Our chefs use only the freshest ingredients to create authentic and exquisite sushi dishes.</p>
-            </div>
-            <div class=\"col-md-4\">
-                <h3>Contact</h3>
-                <address>
-                    123 Sushi Lane<br>
-                    Tokyo<br>
-                    <a href=\"tel:+81312345678\">+81-3-1234-5678</a><br>
-                    <a href=\"mailto:sushi@example.com\">sushi@example.com</a>
-                </address>
-            </div>
-        </div>
-    </main>
-
-    <script src=\"static/bootstrap.bundle.min.js\"></script>
-    <script src=\"static/script.js\"></script>
-</body>
-</html>
-"""
-
-        # Write files into site/ and site/static
-        write_targets = [
-                ("site/index.html", index_html),
-                ("site/static/bootstrap.min.css", css_content),
-                ("site/static/bootstrap.bundle.min.js", js_content),
-                ("site/static/styles.css", custom_css),
-                ("site/static/script.js", fallback_js),
-        ]
-
-        for path, content in write_targets:
+        # parse arguments
+        if isinstance(raw_args, dict):
+            args = raw_args
+        else:
             try:
-                res = self.execute_tool("write_file", {"path": path, "content": content})
-                results.append(f"{path}: {res}")
-            except Exception as e:
-                results.append(f"{path}: ERROR {e}")
+                args = json.loads(raw_args)
+            except:
+                args = {}
 
-        return "\n".join(results)
+        # execute
+        result = self.execute_tool(tool_name, args)
 
+        # append tool message so model sees the result
+        self.messages.append({
+            "role": "tool",
+            "tool_call_id": call.get("id", f"tool_{tool_name}"),
+            "name": tool_name,
+            "content": json.dumps({"result": result})
+        })
+
+    # -------------------------------------------------------------
+    # Embedded JSON tool-call detection
+    # -------------------------------------------------------------
+    def _execute_json_tool_calls(self, assistant_text):
+        """
+        Extremely robust tool-call extractor.
+        Detects model-generated write_file/read_file/list_files calls
+        even when the model prints raw dicts, Python-style dicts,
+        incomplete JSON, or multiple adjacent objects.
+        """
+        
+        executed = False
+        
+        # Split by code fences to handle multiple JSON blocks
+        blocks = assistant_text.split("```json")
+        
+        for block in blocks[1:]:  # Skip first element (text before first ```json)
+            # Extract content before closing ```
+            if "```" in block:
+                json_content = block.split("```")[0].strip()
+            else:
+                json_content = block.strip()
+            
+            if not json_content or '"name"' not in json_content:
+                continue
+            
+            # Try strict JSON decode first
+            try:
+                parsed = json.loads(json_content)
+            except Exception:
+                # Try to convert Python dict → JSON
+                try:
+                    fixed = json_content.replace("'", "\"")
+                    parsed = json.loads(fixed)
+                except Exception:
+                    continue
+            
+            # Ensure it's a tool dict
+            if not isinstance(parsed, dict):
+                continue
+            if "name" not in parsed:
+                continue
+            
+            # Execute the tool
+            print(f"\n[Executing tool: {parsed.get('name')}]")
+            self._exec_tool_call(parsed)
+            executed = True
+        
+        return executed
+
+    # -------------------------------------------------------------
+    # Main interaction
+    # -------------------------------------------------------------
     def ask(self, user_input, debug=False):
+        """
+        Main conversation loop.
+        Always expects that the model eventually emits write_file tool calls.
+        Handles model output, tool calls, retrieval context injection, and
+        stopping condition.
+        """
+
         # append user message
         self.messages.append({"role": "user", "content": user_input})
 
-        # add retrieval context before calling the model
-        try:
-            self._append_retrieval_context(user_input, k=3)
-        except Exception:
-            pass
+        # inject retrieval context for grounding
+        self._append_retrieval_context(user_input, k=5)
 
         loop_guard = 0
-        last_assistant_content = ""
+
         while True:
             loop_guard += 1
-            if loop_guard > 8:
+            if loop_guard > 12:
                 return "Stopped after max iterations."
 
             # send to model
             resp = self.client.send(self.messages, tools=self.tools, stream=False)
 
             if debug:
-                print("\n[DEBUG] Full API response:")
+                print("\n[DEBUG] Full API response keys:", list(resp.keys()))
                 print(json.dumps(resp, indent=2))
 
-            assistant = resp.get("message", {})
-            content = assistant.get("content", "")
-            tool_calls = assistant.get("tool_calls")
+            assistant = resp.get("message", {}) or {}
+            content = assistant.get("content", "") or ""
 
-            # show assistant content if any (intermediate reasoning)
+            # show the assistant's content if present
             if content:
-                print(f"\nAssistant: {content}")
+                print("\nAssistant:", content)
 
-            # detect confirmation flow: if assistant asked to build and last user confirmed -> do the build locally
-            last_user = ""
-            # find last user message
-            for m in reversed(self.messages):
-                if m.get("role") == "user":
-                    last_user = m.get("content", "")
-                    break
+            # extract tool calls from top-level or nested
+            tool_calls = (
+                resp.get("tool_calls")
+                or assistant.get("tool_calls")
+                or resp.get("message", {}).get("tool_calls")
+            )
 
-            if not tool_calls:
-                # If assistant asks to build and user confirmed, run build and append tool message then continue loop
-                if self._user_confirmed_build(last_user, content):
-                    build_result = self._build_website()
-                    print("[LOCAL BUILD] Result:\n", build_result)
-                    # append a synthetic tool message so model gets context of action
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": "local_build_1",
-                        "name": "local_build",
-                        "content": json.dumps({"result": build_result})
-                    })
-                    # also append assistant acknowledgement so model can continue if needed
-                    self.messages.append({"role": "assistant", "content": "Build completed locally."})
-                    # continue the loop to get final model confirmation/next steps
-                    continue
-
-                # otherwise treat as final answer and return content
-                print("\n===== FINAL ANSWER =====\n")
-                return content
-
-            # otherwise, developer model wants us to run tools
-            # append assistant message (so model maintains context)
-            self.messages.append({"role": "assistant", **assistant})
-
-            # execute each tool call and append its result as a tool message
-            for call in tool_calls:
-                # Expecting structure similar to: {"id": ..., "function": {"name":..., "arguments": ...}}
-                fn = call.get("function", {})
-                tool_name = fn.get("name")
-                raw_args = fn.get("arguments")
-
-                # parse arguments robustly
-                if isinstance(raw_args, dict):
-                    args = raw_args
+            # tool_calls must be handled robustly
+            if tool_calls:
+                # normalize tool_calls to a list
+                if isinstance(tool_calls, dict):
+                    calls = [tool_calls]
+                elif isinstance(tool_calls, list):
+                    calls = tool_calls
                 else:
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception as e:
-                        # on parse error, provide a helpful debug message
-                        err_msg = f"ERROR parsing tool arguments for {tool_name}: {e}\nRaw: {raw_args}"
-                        print(err_msg)
-                        # append a tool message with the error so the model can continue
-                        self.messages.append({
-                            "role": "tool",
-                            "tool_call_id": call.get("id"),
-                            "name": tool_name,
-                            "content": err_msg,
-                        })
-                        continue
+                    calls = []
 
-                print(f"\n[Executing tool: {tool_name} with args {args}]")
-                result = self.execute_tool(tool_name, args)
-                print(f"Result: {result}")
+                # persist the assistant's tool call message so IDs are preserved
+                assistant_msg = {
+                    "role": assistant.get("role", "assistant"),
+                    "content": content,
+                    "tool_calls": calls
+                }
+                self.messages.append(assistant_msg)
 
-                # append tool result for the model to consume
-                # wrap result as JSON string for clarity
-                try:
-                    tool_content = json.dumps({"result": result})
-                except Exception:
-                    tool_content = str(result)
+                # execute each tool call
+                for call in calls:
+                    self._exec_tool_call(call)
 
-                self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": call.get("id"),
-                    "name": tool_name,
-                    "content": tool_content,
-                })
+                # model must receive the tool results
+                continue
+
+            # detect embedded JSON tool-calls inside assistant text
+            if content and self._execute_json_tool_calls(content):
+                continue
+
+            # no tool calls -> final natural language answer
+            print("\n===== FINAL ANSWER =====\n")
+            return content
 
 
-# After agent initialization or at top of `main()` / `run()`:
-store = LocalVectorStore(persist_dir="data/chroma", collection_name="bootstrap")
-try:
-    sample = store.search("container class css", k=3)
-    print("[RETRIEVAL DEBUG] sample search results:", sample)
-except Exception as e:
-    print("[RETRIEVAL DEBUG] failed search:", e)
-
+# -------------------------------------------------------------
+# Optional CLI launcher
+# -------------------------------------------------------------
 if __name__ == "__main__":
     agent = BuilderAgent()
-    print("Builder Agent CLI")
-    print("Type a request (ex: 'Create a simple landing page')")
+    print("Builder Agent")
+    print("Type your request (ex: 'Create a simple landing page')")
     while True:
         q = input("You: ")
         agent.ask(q, debug=True)

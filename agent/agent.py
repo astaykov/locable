@@ -1,155 +1,330 @@
-import os
+import re
 import json
-import requests
+import os
+from pathlib import Path
+from .agent import write_file, read_file, list_files, load_tools, load_system_prompt
+from .final_model import FinalModelClient
+from rag.vectorstore import LocalVectorStore
 
 
-# ---------------------------------------------------------
-# Load tools.json
-# ---------------------------------------------------------
-def load_tools():
-    with open("tools.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+class BuilderAgent:
+    """
+    Builder agent that coordinates model calls, message flow, and tool execution.
+    This version removes the fallback scaffold and enforces model-directed building.
+    Phase 1 (information gathering) is still supported.
+    """
 
+    def __init__(self, model=None, host=None):
+        model = model or "qwen2.5-coder:14b-instruct"
+        host = host or "http://localhost:11434"
+        self.client = FinalModelClient(model=model, host=host)
 
-# ---------------------------------------------------------
-# Tool Implementations
-# ---------------------------------------------------------
-def write_file(path, content):
-    os.makedirs(os.path.dirname(path), exist_ok=True) if "/" in path else None
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
-    return f"File written: {path}"
-
-
-def read_file(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return f"Error: file not found: {path}"
-
-
-def list_files():
-    files = []
-    for root, dirs, filenames in os.walk("."):
-        for name in filenames:
-            files.append(os.path.join(root, name))
-    return json.dumps(files, indent=2)
-
-def load_system_prompt():
-    with open("prompts/system_prompt.txt", "r", encoding="utf-8") as f:
-        return f.read()
-
-# ---------------------------------------------------------
-# Agent Class
-# ---------------------------------------------------------
-class WebsiteBuilderAgent:
-    def __init__(self, model="qwen2.5-coder:14b-instruct", host="http://localhost:11434"):
-        self.model = model
-        self.url = f"{host}/api/chat"
+        # load tools and system prompt
         self.tools = load_tools()
-        self.messages = []
-
-        # Basic system prompt — you can extend later
         self.system_prompt = load_system_prompt()
 
+        # conversation state
+        self.messages = [{"role": "system", "content": self.system_prompt}]
 
-    # Map tool name to function
+        # retrieval layer
+        self.store = LocalVectorStore(
+            persist_dir="data/chroma",
+            collection_name="bootstrap"
+        )
+
+    # -------------------------------------------------------------
+    # Tool execution
+    # -------------------------------------------------------------
     def execute_tool(self, name, args):
+        """
+        Execute a declared tool using the existing write_file/read_file/list_files helpers.
+        This method forces all writes into site/ for safety, and rewrites Bootstrap CDN paths.
+        """
+
+        print(f"\n[DEBUG execute_tool] Called with name='{name}'")
+        print(f"[DEBUG] args: {args}")
+
         if name == "write_file":
-            return write_file(args["path"], args["content"])
+            path = args.get("path")
+            content = args.get("content", "")
+            if not path:
+                return "ERROR: missing path"
+
+            # normalize path into site/
+            p = Path(path)
+            print(f"[DEBUG] Original path: {path}")
+            
+            if not p.parts or p.parts[0] != "site":
+                p = Path("site") / p
+            
+            full = p.resolve()
+            print(f"[DEBUG] Full resolved path: {full}")
+            
+            os.makedirs(full.parent, exist_ok=True)
+            print(f"[DEBUG] Created directory: {full.parent}")
+
+            # rewrite Bootstrap CDN references to local static files
+            if full.suffix.lower() == ".html" and isinstance(content, str):
+                content = (
+                    content.replace(
+                        "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css",
+                        "static/bootstrap.min.css"
+                    )
+                    .replace(
+                        "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js",
+                        "static/bootstrap.bundle.min.js"
+                    )
+                )
+
+            print(f"[DEBUG] Calling write_file({full}, content_length={len(content)})")
+            result = write_file(str(full), content)
+            print(f"[DEBUG] write_file returned: {result}")
+            return result
+
         elif name == "read_file":
-            return read_file(args["path"])
+            result = read_file(args.get("path"))
+            print(f"[DEBUG] read_file returned: {result[:100] if result else result}...")
+            return result
+
         elif name == "list_files":
-            return list_files()
+            result = list_files()
+            print(f"[DEBUG] list_files returned: {result}")
+            return result
+
+        # unknown tool
         return f"Unknown tool: {name}"
 
-    # Main call
-    def ask(self, user_input):
-        # Only include system prompt once
-        if not self.messages:
-            self.messages.append({"role": "system", "content": self.system_prompt})
+    # -------------------------------------------------------------
+    # Retrieval context injection
+    # -------------------------------------------------------------
+    def _append_retrieval_context(self, user_input, k=5):
+        """
+        Perform Bootstrap-component retrieval using the local vector store and
+        inject results as a system message. This improves model grounding.
+        """
 
-        # Add user's new message
+        try:
+            hits = self.store.search(user_input, k)
+        except Exception:
+            return False
+
+        # normalize retrieved docs
+        if isinstance(hits, dict):
+            docs = (hits.get("documents") or [[]])[0]
+        elif isinstance(hits, list):
+            docs = hits
+        else:
+            try:
+                docs = list(hits)
+            except:
+                docs = []
+
+        if not docs:
+            return False
+
+        snippet = "\n\n--- Retrieved Bootstrap context ---\n\n"
+        for i, d in enumerate(docs[:k]):
+            snippet += f"[{i+1}] {d[:1500].replace('\\n',' ')}\n\n"
+
+        self.messages.append({"role": "system", "content": snippet})
+        return True
+
+    # -------------------------------------------------------------
+    # Tool-call execution helper
+    # -------------------------------------------------------------
+    def _exec_tool_call(self, call):
+        """
+        Execute a single tool call. Accepts any model-produced shape.
+        """
+
+        fn = call.get("function") or {}
+        tool_name = fn.get("name") or call.get("name")
+        raw_args = fn.get("arguments") if fn else call.get("arguments")
+
+        print(f"\n[DEBUG _exec_tool_call] tool_name: {tool_name}")
+        print(f"[DEBUG] raw_args type: {type(raw_args)}")
+        print(f"[DEBUG] raw_args: {raw_args}")
+
+        # parse arguments
+        if isinstance(raw_args, dict):
+            args = raw_args
+        else:
+            try:
+                args = json.loads(raw_args)
+            except Exception as e:
+                print(f"[ERROR] Failed to parse arguments: {e}")
+                args = {}
+
+        # execute
+        result = self.execute_tool(tool_name, args)
+
+        # append tool message so model sees the result
+        self.messages.append({
+            "role": "tool",
+            "tool_call_id": call.get("id", f"tool_{tool_name}"),
+            "name": tool_name,
+            "content": json.dumps({"result": result})
+        })
+
+    # -------------------------------------------------------------
+    # Embedded JSON tool-call detection (FIXED VERSION)
+    # -------------------------------------------------------------
+    def _execute_json_tool_calls(self, assistant_text):
+        """
+        Robust tool-call extractor for model-generated JSON blocks.
+        Handles multiple ```json blocks in the assistant's response.
+        """
+
+        executed = False
+
+        print("\n[DEBUG _execute_json_tool_calls] Checking for embedded tool calls...")
+        
+        # Split by ```json markers
+        blocks = assistant_text.split("```json")
+        print(f"[DEBUG] Found {len(blocks) - 1} potential JSON blocks")
+
+        for i, block in enumerate(blocks[1:], 1):  # Skip first element (text before first ```json)
+            # Extract content before closing ```
+            if "```" in block:
+                json_content = block.split("```")[0].strip()
+            else:
+                json_content = block.strip()
+
+            print(f"\n[DEBUG] Block {i} content preview: {json_content[:100]}...")
+            
+            if not json_content or '"name"' not in json_content:
+                print(f"[DEBUG] Block {i} skipped (no 'name' field)")
+                continue
+
+            # Try strict JSON decode first
+            try:
+                parsed = json.loads(json_content)
+                print(f"[DEBUG] Block {i} parsed successfully")
+            except Exception as e:
+                print(f"[DEBUG] Block {i} JSON parse failed: {e}")
+                # Try to convert Python dict → JSON
+                try:
+                    fixed = json_content.replace("'", "\"")
+                    parsed = json.loads(fixed)
+                    print(f"[DEBUG] Block {i} parsed after quote fix")
+                except Exception as e2:
+                    print(f"[DEBUG] Block {i} still failed after quote fix: {e2}")
+                    continue
+
+            # Ensure it's a tool dict
+            if not isinstance(parsed, dict):
+                print(f"[DEBUG] Block {i} not a dict")
+                continue
+            if "name" not in parsed:
+                print(f"[DEBUG] Block {i} has no 'name' field")
+                continue
+
+            # Execute the tool
+            print(f"\n[Executing embedded tool: {parsed.get('name')}]")
+            self._exec_tool_call(parsed)
+            executed = True
+
+        print(f"\n[DEBUG] Total tools executed from embedded JSON: {executed}")
+        return executed
+
+
+    # -------------------------------------------------------------
+    # Main interaction
+    # -------------------------------------------------------------
+    def ask(self, user_input, debug=False):
+        """
+        Main conversation loop.
+        Always expects that the model eventually emits write_file tool calls.
+        Handles model output, tool calls, retrieval context injection, and
+        stopping condition.
+        """
+
+        # append user message
         self.messages.append({"role": "user", "content": user_input})
 
+        # inject retrieval context for grounding
+        self._append_retrieval_context(user_input, k=5)
+
+        loop_guard = 0
+
         while True:
+            loop_guard += 1
+            if loop_guard > 12:
+                return "Stopped after max iterations."
 
-            payload = {
-                "model": self.model,
-                "messages": self.messages,
-                "tools": self.tools,
-                "stream": False
-            }
+            # send to model
+            resp = self.client.send(self.messages, tools=self.tools, stream=False)
 
-            response = requests.post(self.url, json=payload)
-            data = response.json()
-            
-            # Debug: Print full response
-            print(f"\n[DEBUG] Full API response: {json.dumps(data, indent=2)}")
-            
-            assistant = data.get("message", {})
-            
-            print(f"\n[DEBUG] Assistant object: {json.dumps(assistant, indent=2)}")
+            if debug:
+                print("\n[DEBUG] Full API response keys:", list(resp.keys()))
+                print(json.dumps(resp, indent=2))
 
-            tool_calls = assistant.get("tool_calls", None)
-            content = assistant.get("content", "")
-            
-            print(f"\n[DEBUG] tool_calls: {tool_calls}")
-            print(f"[DEBUG] content: {content}")
+            assistant = resp.get("message", {}) or {}
+            content = assistant.get("content", "") or ""
 
-            # Print any content from the assistant
+            # show the assistant's content if present
             if content:
-                print(f"\nAssistant: {content}")
+                print("\nAssistant:", content[:500])  # Truncate long responses
 
-            # No tool call → final message
-            if not tool_calls:
-                print("\n===== FINAL ANSWER =====\n")
-                return content
+            # extract tool calls from top-level or nested
+            tool_calls = (
+                resp.get("tool_calls")
+                or assistant.get("tool_calls")
+                or resp.get("message", {}).get("tool_calls")
+            )
 
-            # Otherwise, execute tools
-            self.messages.append({"role": "assistant", **assistant})
-
-            for call in tool_calls:
-                tool_name = call["function"]["name"]
-                raw_args = call["function"]["arguments"]
-
-                # DEBUG PRINT
-                print("\n[DEBUG] Raw arguments from model:", raw_args)
-
-                # Robust argument parsing
-                if isinstance(raw_args, dict):
-                    args = raw_args
+            # tool_calls must be handled robustly
+            if tool_calls:
+                print(f"\n[DEBUG] Found {len(tool_calls) if isinstance(tool_calls, list) else 1} standard tool calls")
+                
+                # normalize tool_calls to a list
+                if isinstance(tool_calls, dict):
+                    calls = [tool_calls]
+                elif isinstance(tool_calls, list):
+                    calls = tool_calls
                 else:
-                    try:
-                        args = json.loads(raw_args)
-                    except Exception as e:
-                        print("\n!!! JSON PARSE ERROR !!!")
-                        print("Model gave:", raw_args)
-                        print("Error:", e)
-                        return
+                    calls = []
 
-                print(f"\n[Executing tool: {tool_name} with args {args}]")        
-                result = self.execute_tool(tool_name, args)
+                # persist the assistant's tool call message so IDs are preserved
+                assistant_msg = {
+                    "role": assistant.get("role", "assistant"),
+                    "content": content,
+                    "tool_calls": calls
+                }
+                self.messages.append(assistant_msg)
 
+                # execute each tool call
+                for call in calls:
+                    self._exec_tool_call(call)
+
+                # model must receive the tool results
+                continue
+
+            # detect embedded JSON tool-calls inside assistant text
+            if content:
+                # Append assistant message FIRST
                 self.messages.append({
-                    "role": "tool",
-                    "tool_call_id": call["id"],
-                    "name": tool_name,
-                    "content": json.dumps({"result": result})
+                    "role": "assistant",
+                    "content": content
                 })
+                
+                # Then check for and execute any embedded tool calls
+                if self._execute_json_tool_calls(content):
+                    print("[DEBUG] Embedded tool calls found and executed, continuing loop...")
+                    continue
+
+            # no tool calls -> final natural language answer
+            print("\n===== FINAL ANSWER =====\n")
+            return content
 
 
-
-# ---------------------------------------------------------
-# Command Line Interface
-# ---------------------------------------------------------
+# -------------------------------------------------------------
+# Optional CLI launcher
+# -------------------------------------------------------------
 if __name__ == "__main__":
-    agent = WebsiteBuilderAgent()
-
-    print("Local Website Builder Agent (DeepSeek + Ollama)")
-    print("Type your request (e.g. 'Create a portfolio landing page'): \n")
-
+    agent = BuilderAgent()
+    print("Builder Agent")
+    print("Type your request (ex: 'Create a simple landing page')")
     while True:
-        user_query = input("You: ")
-        agent.ask(user_query)
+        q = input("You: ")
+        agent.ask(q, debug=True)
