@@ -399,6 +399,10 @@ header.navbar {
   color: var(--ink);
 }
 
+#generatingMessage {
+  color: #ffffff;
+}
+
 .spinner-border { 
   width: 2.5rem; 
   height: 2.5rem; 
