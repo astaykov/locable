@@ -18,6 +18,8 @@ const statusText = document.querySelector('.status-text');
 let currentGeneratedFiles = [];
 let isGenerating = false;
 let startTime = null;
+let currentRunId = null;
+let messageCursor = 0;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -115,30 +117,33 @@ async function generateWebsite(prompt) {
 
     const result = await response.json();
 
-    // Add agent response to chat
-    addSystemMessage(result.message);
+    currentRunId = result.run_id || null;
+    messageCursor = 0;
 
     // Update generation time
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
     generationTime.textContent = `Generated in ${elapsed}s`;
+
+    // Load chat history from API (user + assistant only)
+    await loadMessages(true);
 
     // Load files
     await loadFiles(result.files);
 
     // Load preview
     if (result.files.length > 0) {
-      const htmlFiles = result.files.filter(f => f.endsWith('.html'));
+      const htmlFiles = result.files.filter((f) => f.endsWith('.html'));
       if (htmlFiles.length > 0) {
         loadPreview(htmlFiles[0]);
       }
     }
 
     statusText.textContent = 'Ready';
-    addSystemMessage(`✅ Website generated successfully with ${result.files.length} files!`);
+    addSystemMessage(`? Website generated successfully with ${result.files.length} files!`);
   } catch (error) {
     console.error('Generation error:', error);
     statusText.textContent = 'Error';
-    addSystemMessage(`❌ Error: ${error.message}`);
+    addSystemMessage(`?? Error: ${error.message}`);
   } finally {
     isGenerating = false;
     chatInput.disabled = false;
@@ -177,57 +182,59 @@ async function loadFiles(files) {
 
 // Render File Tree
 function renderFileTree(tree, container, prefix) {
-  Object.keys(tree).sort().forEach((key) => {
-    const isDirectory = tree[key] !== null && typeof tree[key] === 'object';
-    const fullPath = prefix ? `${prefix}/${key}` : key;
+  Object.keys(tree)
+    .sort()
+    .forEach((key) => {
+      const isDirectory = tree[key] !== null && typeof tree[key] === 'object';
+      const fullPath = prefix ? `${prefix}/${key}` : key;
 
-    if (isDirectory) {
-      const folder = document.createElement('div');
-      folder.className = 'file-item-folder';
+      if (isDirectory) {
+        const folder = document.createElement('div');
+        folder.className = 'file-item-folder';
 
-      const header = document.createElement('div');
-      header.className = 'file-item';
-      header.innerHTML = `
+        const header = document.createElement('div');
+        header.className = 'file-item';
+        header.innerHTML = `
         <i class="bi bi-folder"></i>
         <span class="file-item-name">${key}</span>
       `;
 
-      const children = document.createElement('div');
-      children.style.paddingLeft = '16px';
-      children.className = 'file-children';
+        const children = document.createElement('div');
+        children.style.paddingLeft = '16px';
+        children.className = 'file-children';
 
-      folder.appendChild(header);
-      folder.appendChild(children);
-      container.appendChild(folder);
+        folder.appendChild(header);
+        folder.appendChild(children);
+        container.appendChild(folder);
 
-      renderFileTree(tree[key], children, fullPath);
-    } else {
-      const file = document.createElement('div');
-      file.className = 'file-item';
-      file.style.cursor = 'pointer';
+        renderFileTree(tree[key], children, fullPath);
+      } else {
+        const file = document.createElement('div');
+        file.className = 'file-item';
+        file.style.cursor = 'pointer';
 
-      const ext = key.split('.').pop().toLowerCase();
-      let icon = 'bi-file';
-      if (['html', 'htm'].includes(ext)) icon = 'bi-file-earmark-code';
-      else if (['css'].includes(ext)) icon = 'bi-file-earmark-css';
-      else if (['js'].includes(ext)) icon = 'bi-file-earmark-js';
-      else if (['json'].includes(ext)) icon = 'bi-file-earmark-code';
-      else if (['md'].includes(ext)) icon = 'bi-file-earmark-text';
+        const ext = key.split('.').pop().toLowerCase();
+        let icon = 'bi-file';
+        if (['html', 'htm'].includes(ext)) icon = 'bi-file-earmark-code';
+        else if (['css'].includes(ext)) icon = 'bi-file-earmark-css';
+        else if (['js'].includes(ext)) icon = 'bi-file-earmark-js';
+        else if (['json'].includes(ext)) icon = 'bi-file-earmark-code';
+        else if (['md'].includes(ext)) icon = 'bi-file-earmark-text';
 
-      file.innerHTML = `
+        file.innerHTML = `
         <i class="bi ${icon}"></i>
         <span class="file-item-name">${key}</span>
       `;
 
-      file.addEventListener('click', () => {
-        document.querySelectorAll('.file-item.active').forEach(el => el.classList.remove('active'));
-        file.classList.add('active');
-        loadFilePreview(fullPath);
-      });
+        file.addEventListener('click', () => {
+          document.querySelectorAll('.file-item.active').forEach((el) => el.classList.remove('active'));
+          file.classList.add('active');
+          loadFilePreview(fullPath);
+        });
 
-      container.appendChild(file);
-    }
-  });
+        container.appendChild(file);
+      }
+    });
 }
 
 // Load File Preview
@@ -302,6 +309,46 @@ function addSystemMessage(text) {
   `;
   chatMessages.appendChild(messageDiv);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function addAssistantMessage(text) {
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'chat-message system';
+  messageDiv.innerHTML = `
+    <div class="message-content">
+      <strong>Locable Assistant:</strong>
+      <p>${escapeHtml(text)}</p>
+    </div>
+  `;
+  chatMessages.appendChild(messageDiv);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// Message loading from API
+async function loadMessages(reset = false) {
+  if (!currentRunId) return;
+  try {
+    const response = await fetch(
+      `${API_BASE}/messages?run_id=${encodeURIComponent(currentRunId)}&cursor=${messageCursor}`
+    );
+    if (!response.ok) return;
+
+    const data = await response.json();
+    if (reset) {
+      chatMessages.innerHTML = '';
+    }
+
+    (data.messages || []).forEach((msg) => {
+      if (msg.role === 'user') {
+        addUserMessage(msg.content || '');
+      } else if (msg.role === 'assistant') {
+        addAssistantMessage(msg.content || '');
+      }
+    });
+    messageCursor = data.next_cursor || messageCursor;
+  } catch (err) {
+    console.error('Failed to load messages', err);
+  }
 }
 
 // Utility Functions

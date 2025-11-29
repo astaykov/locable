@@ -21,7 +21,7 @@ RUN_MESSAGES: Dict[str, List[dict]] = {}
 
 # Get the directory containing this file
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SITE_DIR = os.path.join(BASE_DIR, "site")
+SITE_DIR = os.path.join(BASE_DIR, "frontend")
 
 # Mount static files
 if os.path.exists(SITE_DIR):
