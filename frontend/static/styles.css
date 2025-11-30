@@ -330,7 +330,8 @@ header.navbar {
 
 .chat-input-area .input-group { 
   display: flex; 
-  gap: 8px; 
+  gap: 8px;
+  align-items: flex-start;
 }
 
 .chat-input-area .form-control {
@@ -340,6 +341,14 @@ header.navbar {
   background: var(--panel);
   color: var(--ink);
   padding: 0.5rem 0.75rem;
+}
+
+.chat-input-area textarea.form-control {
+  min-height: 38px;
+  max-height: 200px;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.4;
 }
 
 .chat-input-area .form-control::placeholder {
@@ -354,6 +363,8 @@ header.navbar {
   padding: 0 1rem;
   transition: all 0.2s;
   font-weight: 500;
+  height: 38px;
+  align-self: flex-start;
 }
 
 .chat-input-area .btn:hover { 

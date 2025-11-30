@@ -28,10 +28,14 @@ SITE_DIR = os.path.join(BASE_DIR, "frontend")
 ROOT_DIR = Path(__file__).resolve().parent
 TEMPLATE_DIR = ROOT_DIR / "data" / "templates"
 BOOTSTRAP_DIR = ROOT_DIR / "data" / "bootstrap"
+SITE_OUTPUT_DIR = ROOT_DIR / "site"
+
+SITE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mount static files
 if os.path.exists(SITE_DIR):
     app.mount("/static", StaticFiles(directory=os.path.join(SITE_DIR, "static")), name="static")
+app.mount("/site", StaticFiles(directory=SITE_OUTPUT_DIR, html=True), name="site")
 
 
 class GenerateRequest(BaseModel):
@@ -72,7 +76,7 @@ async def _run_builder(req: GenerateRequest, run_id: str) -> str:
 def _copy_bootstrap_to_site():
     """Ensure site/static has bootstrap assets for html-only mode."""
     for dest_root in [
-        ROOT_DIR / "site" / "static",
+        SITE_OUTPUT_DIR / "static",
         ROOT_DIR / "frontend" / "static",
     ]:
         dest_root.mkdir(parents=True, exist_ok=True)
@@ -168,7 +172,7 @@ def _generate_html_only(prompt: str) -> str:
     # ensure site/static/bootstrap assets exist
     _copy_bootstrap_to_site()
 
-    target = ROOT_DIR / "site" / "index.html"
+    target = SITE_OUTPUT_DIR / "index.html"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(sanitized_html, encoding="utf-8")
     return f"HTML-only build created from template '{template_name}' using {main_html_path.name}"

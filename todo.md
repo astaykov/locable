@@ -1,7 +1,9 @@
-- [ ] CSS template model that only generates html
+- [x] CSS template model that only generates html
 - [ ] few shot prompting with examples so the model knows what a good website looks like
 - [x] convince/polish model to generate longer css by increasing top k or letting the model decide top k
 - [x] decide on root accent/text/backround color ect. for consistent style
-- [ ] GUI survey type section for detailed generated prompts.
+- [x] GUI survey type section for detailed generated prompts.
 - [x] multi page generation
 - [ ] add docker image and github versions
+- [ ] add model selection
+- [ ] template review for html only model

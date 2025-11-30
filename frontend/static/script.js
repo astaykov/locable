@@ -22,6 +22,7 @@ let startTime = null;
 let currentRunId = null;
 let messageCursor = 0;
 let messagesInterval = null;
+let lastPreviewPath = null;
 
 // Resizer functionality
 let isResizing = false;
@@ -31,11 +32,14 @@ let currentResizer = null;
 document.addEventListener('DOMContentLoaded', () => {
   chatInput.disabled = false;
   sendBtn.disabled = false;
+  autoResizeChatInput();
   checkHealth();
   initResizers();
 });
 
 // Event Listeners
+chatInput.addEventListener('input', autoResizeChatInput);
+
 sendBtn.addEventListener('click', () => {
   if (chatInput.value.trim()) {
     sendMessage();
@@ -52,7 +56,11 @@ chatInput.addEventListener('keypress', (e) => {
 });
 
 refreshPreviewBtn.addEventListener('click', () => {
-  previewFrame.src = previewFrame.src;
+  if (lastPreviewPath) {
+    loadFilePreview(lastPreviewPath, true);
+  } else if (previewFrame.src) {
+    previewFrame.src = previewFrame.src;
+  }
 });
 
 fullscreenBtn.addEventListener('click', () => {
@@ -124,8 +132,6 @@ async function checkHealth() {
   } catch (error) {
     addSystemMessage('Cannot connect to API server. Ensure it is running on port 8000.');
     statusText.textContent = 'Disconnected';
-    chatInput.disabled = true;
-    sendBtn.disabled = true;
   }
 }
 
@@ -136,6 +142,7 @@ async function sendMessage() {
 
   addUserMessage(prompt);
   chatInput.value = '';
+  autoResizeChatInput();
   await generateWebsite(prompt);
 }
 
@@ -210,6 +217,7 @@ async function generateWebsite(prompt) {
     isGenerating = false;
     chatInput.disabled = false;
     sendBtn.disabled = false;
+    autoResizeChatInput();
     modal.hide();
   }
 }
@@ -291,36 +299,44 @@ function renderFileTree(tree, container, prefix) {
 }
 
 // Load File Preview
-async function loadFilePreview(filePath) {
+async function loadFilePreview(filePath, forceReload = false) {
+  lastPreviewPath = filePath;
   try {
-    const response = await fetch(`${API_BASE}/files/${filePath}`);
-    if (!response.ok) throw new Error('Failed to load file');
-
-    const content = await response.text();
     const ext = filePath.split('.').pop().toLowerCase();
 
     if (['html', 'htm'].includes(ext)) {
-      previewFrame.srcdoc = content;
-      previewUrl.value = filePath;
-    } else {
-      const encoded = content
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+      const normalizedPath = filePath.startsWith('site/') ? filePath : `site/${filePath}`;
+      const cacheBuster = forceReload ? `?t=${Date.now()}` : '';
+      const previewSrc = `${API_BASE}/${normalizedPath}${cacheBuster}`;
 
-      previewFrame.srcdoc = `
-        <html>
-          <head>
-            <style>
-              body { font-family: monospace; margin: 20px; white-space: pre-wrap; background: #1a1c21; color: #f7f7f7; }
-              code { display: block; background: #16181c; padding: 15px; border-radius: 6px; border: 1px solid #2a2d33; }
-            </style>
-          </head>
-          <body><code>${encoded}</code></body>
-        </html>
-      `;
-      previewUrl.value = filePath;
+      previewFrame.srcdoc = '';
+      previewFrame.removeAttribute('srcdoc');
+      previewFrame.src = previewSrc;
+      previewUrl.value = `/${normalizedPath}`;
+      return;
     }
+
+    const response = await fetch(`${API_BASE}/files/${filePath}${forceReload ? `?t=${Date.now()}` : ''}`);
+    if (!response.ok) throw new Error('Failed to load file');
+
+    const content = await response.text();
+    const encoded = content
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    previewFrame.srcdoc = `
+      <html>
+        <head>
+          <style>
+            body { font-family: monospace; margin: 20px; white-space: pre-wrap; background: #1a1c21; color: #f7f7f7; }
+            code { display: block; background: #16181c; padding: 15px; border-radius: 6px; border: 1px solid #2a2d33; }
+          </style>
+        </head>
+        <body><code>${encoded}</code></body>
+      </html>
+    `;
+    previewUrl.value = filePath;
   } catch (error) {
     console.error('Error loading file:', error);
     previewFrame.srcdoc = `<html><body style="padding: 20px; background: #1a1c21; color: #f7f7f7;"><p>Error loading file: ${error.message}</p></body></html>`;
@@ -329,7 +345,6 @@ async function loadFilePreview(filePath) {
 
 // Load Website Preview
 function loadPreview(htmlFile) {
-  previewUrl.value = htmlFile;
   loadFilePreview(htmlFile);
 }
 
@@ -395,4 +410,10 @@ function escapeHtml(text) {
     "'": '&#039;',
   };
   return text.replace(/[&<>"']/g, (m) => map[m]);
+}
+
+function autoResizeChatInput() {
+  chatInput.style.height = 'auto';
+  const newHeight = Math.min(chatInput.scrollHeight, 200);
+  chatInput.style.height = `${newHeight}px`;
 }
