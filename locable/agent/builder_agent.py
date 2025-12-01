@@ -24,6 +24,8 @@ class BuilderAgent:
     def __init__(self, model=None, host=None):
         model = model or "qwen2.5-coder:14b-instruct"
         host = host or "http://localhost:11434"
+        self.model = model
+        self.host = host
         self.client = FinalModelClient(model=model, host=host)
 
         # load tools and system prompt
@@ -36,7 +38,7 @@ class BuilderAgent:
 
         # retrieval layer
         self.store = LocalVectorStore(
-            persist_dir="data/chroma",
+            persist_dir=str(ROOT_DIR / "data" / "chroma"),
             collection_name="bootstrap"
         )
 
@@ -322,9 +324,71 @@ class BuilderAgent:
 # Optional CLI launcher
 # -------------------------------------------------------------
 if __name__ == "__main__":
-    agent = BuilderAgent()
-    print("Builder Agent")
-    print("Type your request (ex: 'Create a simple landing page')")
+    import argparse
+    import textwrap
+
+    def _parse_args():
+        parser = argparse.ArgumentParser(
+            prog="locable",
+            description="Chat with the Locable builder agent to generate sites.",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        parser.add_argument("-m", "--model", help="Override the Ollama model name")
+        parser.add_argument("--host", help="Override the Ollama host (ex: http://ollama:11434)")
+        parser.add_argument("-d", "--debug", action="store_true", help="Log full model responses")
+        return parser.parse_args()
+
+    def _print_banner(agent: BuilderAgent, debug: bool):
+        bar = "=" * 68
+        print(f"\n{bar}")
+        print(" Locable Builder CLI ".center(68))
+        print(bar)
+        defaults = [
+            f"Model: {agent.model}",
+            f"Ollama: {agent.host}",
+            f"Debug logging: {'on' if debug else 'off'}",
+        ]
+        print(" | ".join(defaults))
+        print("\nType a request (ex: Create a simple landing page)")
+        print("Commands: /help to see tips, /quit to exit\n")
+
+    def _print_help():
+        print(
+            textwrap.dedent(
+                """
+                Quick commands:
+                  /help   show this message
+                  /quit   exit the CLI
+
+                Examples:
+                  prompt> Build a two-page portfolio with a contact form
+                  prompt> Add a CTA section with a button and background image
+                """
+            ).strip()
+        )
+
+    args = _parse_args()
+    agent = BuilderAgent(model=args.model, host=args.host)
+    _print_banner(agent, args.debug)
+
     while True:
-        q = input("You: ")
-        agent.ask(q, debug=True)
+        try:
+            q = input("prompt> ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nGoodbye.")
+            break
+
+        if not q:
+            continue
+
+        normalized = q.lower()
+        if normalized in {"exit", "quit", "/quit", "/q"}:
+            print("Goodbye.")
+            break
+        if normalized in {"help", "/help"}:
+            _print_help()
+            continue
+
+        result = agent.ask(q, debug=args.debug)
+        if result:
+            print(f"\nResult: {result}\n")

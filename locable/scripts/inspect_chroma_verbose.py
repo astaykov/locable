@@ -1,7 +1,14 @@
 import os
 import sys
-from rag.chroma_store import ChromaVectorStore
+from pathlib import Path
 import inspect
+
+ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = ROOT.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from locable.rag.chroma_store import ChromaVectorStore
 
 def print_attr(obj, name):
     try:
@@ -10,7 +17,7 @@ def print_attr(obj, name):
     except Exception as e:
         print(f"{name}: <error: {e}>")
 
-store = ChromaVectorStore(persist_dir="data/chroma", collection_name="bootstrap")
+store = ChromaVectorStore(persist_dir=str(ROOT / "data" / "chroma"), collection_name="bootstrap")
 client = store.client
 collection = store.collection
 

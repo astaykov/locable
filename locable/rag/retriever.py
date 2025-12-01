@@ -1,6 +1,7 @@
+from pathlib import Path
 from typing import List, Dict
 
-from .vectorstore import LocalVectorStore
+from .vectorstore import DEFAULT_PERSIST_DIR, LocalVectorStore
 
 
 class Retriever:
@@ -10,7 +11,7 @@ class Retriever:
     convenient structure for callers that want metadata and distances.
     """
 
-    def __init__(self, persist_dir: str = "data/chroma", collection_name: str = "bootstrap"):
+    def __init__(self, persist_dir: str | Path = DEFAULT_PERSIST_DIR, collection_name: str = "bootstrap"):
         self.store = LocalVectorStore(persist_dir=persist_dir, collection_name=collection_name)
 
     def get_relevant(self, query: str, k: int = 20) -> List[Dict]:

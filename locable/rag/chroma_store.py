@@ -1,6 +1,7 @@
 import os
 import glob
 import json
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 # try to import chromadb and its Settings helper (not all versions expose Settings)
@@ -17,16 +18,20 @@ except Exception:
 import numpy as np
 from .embedding import embed
 
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PERSIST_DIR = PACKAGE_ROOT / "data" / "chroma"
+DEFAULT_BOOTSTRAP_DIR = PACKAGE_ROOT / "data" / "bootstrap"
+
 
 class ChromaVectorStore:
     """Simple Chroma-backed vector store for local files."""
 
-    def __init__(self, persist_dir: str = "data/chroma", collection_name: str = "bootstrap"):
+    def __init__(self, persist_dir: str | Path = DEFAULT_PERSIST_DIR, collection_name: str = "bootstrap"):
         if chromadb is None:
             raise ImportError("chromadb is not installed. Install with `pip install chromadb`")
 
         # make persist_dir absolute to avoid chroma using a different default location
-        self.persist_dir = os.path.abspath(persist_dir)
+        self.persist_dir = os.path.abspath(str(persist_dir))
         self.collection_name = collection_name
         os.makedirs(self.persist_dir, exist_ok=True)
 
@@ -88,8 +93,9 @@ class ChromaVectorStore:
             start = max(0, end - overlap)
         return chunks
 
-    def index_bootstrap_files(self, source_dir: str = "data/bootstrap", chunk_size: int = 1000, overlap: int = 200):
+    def index_bootstrap_files(self, source_dir: str | Path = DEFAULT_BOOTSTRAP_DIR, chunk_size: int = 1000, overlap: int = 200):
         """Index all files under `source_dir` into Chroma. Returns number of chunks indexed."""
+        source_dir = os.path.abspath(str(source_dir))
         files = glob.glob(os.path.join(source_dir, "**"), recursive=True)
         files = [f for f in files if os.path.isfile(f)]
 
@@ -251,11 +257,11 @@ class ChromaVectorStore:
 if __name__ == "__main__":
     print("Chroma Vector Store Indexer")
     try:
-        store = ChromaVectorStore(persist_dir="data/chroma", collection_name="bootstrap")
+        store = ChromaVectorStore(persist_dir=DEFAULT_PERSIST_DIR, collection_name="bootstrap")
     except ImportError as e:
         print(e)
         print("Install chromadb: pip install chromadb")
         raise SystemExit(1)
 
-    indexed = store.index_bootstrap_files(source_dir="data/bootstrap", chunk_size=1000, overlap=200)
+    indexed = store.index_bootstrap_files(source_dir=DEFAULT_BOOTSTRAP_DIR, chunk_size=1000, overlap=200)
     print(f"Done. Indexed {indexed} chunks.")

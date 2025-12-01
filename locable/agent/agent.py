@@ -35,7 +35,7 @@ class BuilderAgent:
 
         # retrieval layer
         self.store = LocalVectorStore(
-            persist_dir="data/chroma",
+            persist_dir=str(ROOT_DIR / "data" / "chroma"),
             collection_name="bootstrap"
         )
 

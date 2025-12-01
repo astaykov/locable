@@ -1,6 +1,7 @@
 import asyncio
 from uuid import uuid4
-import os
+from pathlib import Path
+import shutil
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -9,10 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .agent.builder_agent import BuilderAgent
-from .agent.tools import list_files, read_file
+from .agent.tools import ROOT_DIR, list_files, read_file
 from .rag.vectorstore import LocalVectorStore
-from pathlib import Path
-import shutil
 
 app = FastAPI(
     title="Locable Builder API",
@@ -22,20 +21,20 @@ app = FastAPI(
 
 RUN_MESSAGES: Dict[str, List[dict]] = {}
 
-# Get the directory containing this file
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SITE_DIR = os.path.join(BASE_DIR, "frontend")
-ROOT_DIR = Path(__file__).resolve().parent
-TEMPLATE_DIR = ROOT_DIR / "data" / "templates"
-BOOTSTRAP_DIR = ROOT_DIR / "data" / "bootstrap"
-SITE_OUTPUT_DIR = ROOT_DIR / "site"
+# Project roots and common paths (inner package lives at locable/locable)
+PACKAGE_ROOT = ROOT_DIR
+SITE_DIR = PACKAGE_ROOT / "frontend"
+TEMPLATE_DIR = PACKAGE_ROOT / "data" / "templates"
+BOOTSTRAP_DIR = PACKAGE_ROOT / "data" / "bootstrap"
+CHROMA_DIR = PACKAGE_ROOT / "data" / "chroma"
+SITE_OUTPUT_DIR = PACKAGE_ROOT / "site"
 
 SITE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mount static files
-if os.path.exists(SITE_DIR):
-    app.mount("/static", StaticFiles(directory=os.path.join(SITE_DIR, "static")), name="static")
-app.mount("/site", StaticFiles(directory=SITE_OUTPUT_DIR, html=True), name="site")
+if SITE_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(SITE_DIR / "static")), name="static")
+app.mount("/site", StaticFiles(directory=str(SITE_OUTPUT_DIR), html=True), name="site")
 
 
 class GenerateRequest(BaseModel):
@@ -77,7 +76,7 @@ def _copy_bootstrap_to_site():
     """Ensure site/static has bootstrap assets for html-only mode."""
     for dest_root in [
         SITE_OUTPUT_DIR / "static",
-        ROOT_DIR / "frontend" / "static",
+        SITE_DIR / "static",
     ]:
         dest_root.mkdir(parents=True, exist_ok=True)
         for fname in ("bootstrap.min.css", "bootstrap.bundle.min.js"):
@@ -88,7 +87,7 @@ def _copy_bootstrap_to_site():
 
 
 def _pick_template(prompt: str) -> tuple[str, Path]:
-    store = LocalVectorStore(persist_dir=str(ROOT_DIR / "data" / "chroma"), collection_name="bootstrap")
+    store = LocalVectorStore(persist_dir=str(CHROMA_DIR), collection_name="bootstrap")
     hits = store.search_templates(prompt, k=1)
 
     # Fallback: broaden search if description-only filter returned nothing
@@ -192,10 +191,10 @@ async def root():
 @app.get("/prompt-builder")
 async def prompt_builder():
     """Serve the survey-driven prompt builder page."""
-    page_path = os.path.join(SITE_DIR, "prompt-builder.html")
-    if not os.path.exists(page_path):
+    page_path = SITE_DIR / "prompt-builder.html"
+    if not page_path.exists():
         raise HTTPException(status_code=404, detail="prompt-builder.html not found")
-    return FileResponse(page_path, media_type="text/html")
+    return FileResponse(str(page_path), media_type="text/html")
 
 
 @app.get("/prompt-builder.html")
@@ -207,10 +206,10 @@ async def prompt_builder_html():
 @app.get("/builder")
 async def builder():
     """Explicit route for the original builder UI."""
-    index_path = os.path.join(SITE_DIR, "index.html")
-    if not os.path.exists(index_path):
+    index_path = SITE_DIR / "index.html"
+    if not index_path.exists():
         raise HTTPException(status_code=404, detail="index.html not found")
-    return FileResponse(index_path, media_type="text/html")
+    return FileResponse(str(index_path), media_type="text/html")
 
 
 @app.get("/builder.html")

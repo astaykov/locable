@@ -4,6 +4,6 @@
 - [x] decide on root accent/text/backround color ect. for consistent style
 - [x] GUI survey type section for detailed generated prompts.
 - [x] multi page generation
-- [ ] add docker image and github versions
+- [x] add docker image and github versions
 - [ ] add model selection
-- [ ] template review for html only model
+- [ ] template preview for html only model

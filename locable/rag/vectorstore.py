@@ -1,9 +1,13 @@
 import json
 import os
+from pathlib import Path
 from typing import List, Dict, Optional, Any
 
 from .chroma_store import ChromaVectorStore
 from .embedding import embed
+
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PERSIST_DIR = PACKAGE_ROOT / "data" / "chroma"
 
 
 class LocalVectorStore:
@@ -16,7 +20,7 @@ class LocalVectorStore:
       - fetch_css_chunks(template_name, limit=5)
     """
 
-    def __init__(self, persist_dir: str = "data/chroma", collection_name: str = "bootstrap"):
+    def __init__(self, persist_dir: str | Path = DEFAULT_PERSIST_DIR, collection_name: str = "bootstrap"):
         self.chroma = ChromaVectorStore(persist_dir=persist_dir, collection_name=collection_name)
 
     def _prepare_chunks(self, payload: List[Any]):
